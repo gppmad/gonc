@@ -3,6 +3,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -10,13 +11,12 @@ import (
 )
 
 type TcpClient struct {
-	RemoteAddr string
-	Input      io.Reader
-	Output     io.Writer
-	conn       net.Conn
+	Input  io.Reader
+	Output io.Writer
+	Conn   net.Conn
 }
 
-func NewTcpClient(RemoteAddr string, input io.Reader, output io.Writer) *TcpClient {
+func NewTcpClient(conn net.Conn, input io.Reader, output io.Writer) *TcpClient {
 	if input == nil {
 		input = os.Stdin
 	}
@@ -25,40 +25,31 @@ func NewTcpClient(RemoteAddr string, input io.Reader, output io.Writer) *TcpClie
 		output = os.Stdout
 	}
 
-	return &TcpClient{RemoteAddr: RemoteAddr, Input: input, Output: output}
-}
-
-func (c *TcpClient) Connect() error {
-	// Connect to remote server.
-	conn, err := net.Dial("tcp", c.RemoteAddr)
-	if err != nil {
-		return err
-	}
-	// Assign the conn to the struct field.
-	c.conn = conn
-	return nil
+	return &TcpClient{Conn: conn, Input: input, Output: output}
 }
 
 // Before call this server initialize the connection with Connect()
 func (c *TcpClient) Start() error {
-	if c.conn == nil {
+	if c.Conn == nil {
 		return errors.New("connect to the target before initialize a new connection")
 	}
-	defer c.conn.Close()
 
 	errChan := make(chan error, 1)
 
 	// Read from the connection.
 	go func() {
-		_, err := io.Copy(c.Output, c.conn)
+		fmt.Println("Data Read from Conn")
+		_, err := io.Copy(c.Output, c.Conn)
 		if err != nil {
 			errChan <- err
 			return
 		}
+		fmt.Println("Close Data Read from Conn")
 		errChan <- nil
 	}()
 
-	_, err := io.Copy(c.conn, c.Input)
+	fmt.Println("Data Write to Conn")
+	_, err := io.Copy(c.Conn, c.Input)
 	if err != nil {
 		return errors.New("error writing in the connection")
 	}
@@ -66,24 +57,43 @@ func (c *TcpClient) Start() error {
 	if err := <-errChan; err != nil {
 		return errors.New("error reading from the connection: " + err.Error())
 	}
+	fmt.Println("Close Data Write to Conn")
 	return nil
+}
+
+// Close the connection
+func (c *TcpClient) Close() error {
+	return c.Conn.Close()
 }
 
 func main() {
 
 	// Connect to remote server.
 	remoteAddr := "tcpbin.com:4242"
-	tcpClient := NewTcpClient(remoteAddr, nil, nil)
 
-	err := tcpClient.Connect()
+	// Connect to remote server.
+	conn, err := net.Dial("tcp", remoteAddr)
 	if err != nil {
 		// handle error
 		log.Fatal("Error during connection: ", err)
 	}
 
+	tcpClient := NewTcpClient(conn, nil, nil)
+	fmt.Println("Connected to a TCP Server")
+
+	// Start the connection
 	err = tcpClient.Start()
 	if err != nil {
 		// handle error
-		log.Fatal("Error during proxy operation: ", err)
+		log.Fatal("Error during starting the proxy connection: ", err)
 	}
+
+	// Close the connection
+
+	err = tcpClient.Close()
+	if err != nil {
+		// handle error
+		log.Fatal("Error during closing the proxy connection: ", err)
+	}
+
 }
