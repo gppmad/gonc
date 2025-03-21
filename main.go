@@ -1,4 +1,3 @@
-// Basic usage, initiate a TCP Connection passing host and port as parameters.
 package main
 
 import (
@@ -38,17 +37,14 @@ func (c *TcpClient) Start() error {
 
 	// Read from the connection.
 	go func() {
-		fmt.Println("Data Read from Conn")
 		_, err := io.Copy(c.Output, c.Conn)
 		if err != nil {
 			errChan <- err
 			return
 		}
-		fmt.Println("Close Data Read from Conn")
 		errChan <- nil
 	}()
 
-	fmt.Println("Data Write to Conn")
 	_, err := io.Copy(c.Conn, c.Input)
 	if err != nil {
 		return errors.New("error writing in the connection")
@@ -57,7 +53,6 @@ func (c *TcpClient) Start() error {
 	if err := <-errChan; err != nil {
 		return errors.New("error reading from the connection: " + err.Error())
 	}
-	fmt.Println("Close Data Write to Conn")
 	return nil
 }
 
@@ -89,7 +84,6 @@ func main() {
 	}
 
 	// Close the connection
-
 	err = tcpClient.Close()
 	if err != nil {
 		// handle error

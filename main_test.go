@@ -3,128 +3,135 @@ package main
 import (
 	"bytes"
 	"errors"
-	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
 
-// Mock implementation is a simple implementation of the Reader interface.
-type MockReader struct {
-	data string
-	pos  int
+// MockNetworkConnection simulates a TCP connection with separate buffers
+// for incoming data (from server to client) and outgoing data (from client to server)
+type MockNetworkConnection struct {
+	IncomingBuffer bytes.Buffer // Data coming from server to client
+	OutgoingBuffer bytes.Buffer // Data going from client to server
+	Closed         bool
 }
 
-// NewMockReader creates a new MockReader.
-func NewMockReader(data string) *MockReader {
-	return &MockReader{data: data}
+// NewMockNetworkConnection creates a new MockNetworkConnection.
+func NewMockNetworkConnection() *MockNetworkConnection {
+	return &MockNetworkConnection{}
 }
 
-// Read reads up to len(p) bytes into p from the predefined string.
-func (r *MockReader) Read(p []byte) (n int, err error) {
-	if r.pos >= len(r.data) {
-		return 0, io.EOF
-	}
-	n = copy(p, r.data[r.pos:])
-	r.pos += n
-	return n, nil
-}
-
-// MockWriter is a simple implementation of the Writer interface that writes to a buffer.
-type MockWriter struct {
-	buf bytes.Buffer
-}
-
-// NewMockWriter creates a new MockWriter.
-func NewMockWriter() *MockWriter {
-	return &MockWriter{}
-}
-
-// Write writes len(p) bytes from p to the buffer.
-func (w *MockWriter) Write(p []byte) (n int, err error) {
-	return w.buf.Write(p)
-}
-
-// String returns the contents of the buffer as a string.
-func (w *MockWriter) String() string {
-	return w.buf.String()
-}
-
-// Mock implementation of net.Conn
-
-// MockConn is a mock implementation of the net.Conn interface.
-type MockConn struct {
-	ReadBuffer  bytes.Buffer
-	WriteBuffer bytes.Buffer
-	Closed      bool
-}
-
-// NewMockConn creates a new MockConn.
-func NewMockConn() *MockConn {
-	return &MockConn{}
-}
-
-// Read reads data from the ReadBuffer.
-func (c *MockConn) Read(b []byte) (n int, err error) {
+// Read simulates reading data sent from the server
+func (c *MockNetworkConnection) Read(b []byte) (n int, err error) {
 	if c.Closed {
 		return 0, errors.New("connection is closed")
 	}
-	return c.ReadBuffer.Read(b)
+	return c.IncomingBuffer.Read(b)
 }
 
-// Write writes data to the WriteBuffer.
-func (c *MockConn) Write(b []byte) (n int, err error) {
+// Write simulates sending data to the server
+func (c *MockNetworkConnection) Write(b []byte) (n int, err error) {
 	if c.Closed {
 		return 0, errors.New("connection is closed")
 	}
-	return c.WriteBuffer.Write(b)
+	return c.OutgoingBuffer.Write(b)
 }
 
 // Close closes the connection.
-func (c *MockConn) Close() error {
+func (c *MockNetworkConnection) Close() error {
 	c.Closed = true
 	return nil
 }
 
 // LocalAddr returns the local network address.
-func (c *MockConn) LocalAddr() net.Addr {
+func (c *MockNetworkConnection) LocalAddr() net.Addr {
 	return &net.IPAddr{IP: net.IPv4(127, 0, 0, 1)}
 }
 
 // RemoteAddr returns the remote network address.
-func (c *MockConn) RemoteAddr() net.Addr {
+func (c *MockNetworkConnection) RemoteAddr() net.Addr {
 	return &net.IPAddr{IP: net.IPv4(127, 0, 0, 1)}
 }
 
 // SetDeadline sets the read and write deadlines associated with the connection.
-func (c *MockConn) SetDeadline(t time.Time) error {
+func (c *MockNetworkConnection) SetDeadline(t time.Time) error {
 	return nil
 }
 
 // SetReadDeadline sets the deadline for future Read calls.
-func (c *MockConn) SetReadDeadline(t time.Time) error {
+func (c *MockNetworkConnection) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
 // SetWriteDeadline sets the deadline for future Write calls.
-func (c *MockConn) SetWriteDeadline(t time.Time) error {
+func (c *MockNetworkConnection) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
 func TestTcpClient(t *testing.T) {
-	mockReader := NewMockReader("Hello")
-	mockWriter := NewMockWriter()
-	mockConn := NewMockConn()
+	// Setup mock connection with simulated server response
+	mockConnection := NewMockNetworkConnection()
+	mockConnection.IncomingBuffer.WriteString("Hello World")
 
-	tcpClient := NewTcpClient(mockConn, mockReader, mockWriter)
+	// Mock stdin (user input to be sent to server)
+	userInput := bytes.NewBufferString("Hello World")
 
+	// Mock stdout (where server responses will be written)
+	serverOutput := new(bytes.Buffer)
+
+	// Create client with mocks
+	tcpClient := NewTcpClient(mockConnection, userInput, serverOutput)
+
+	// Start in goroutine since it blocks
+	done := make(chan struct{})
+	go func() {
+		tcpClient.Start()
+		close(done)
+	}()
+
+	// Let the goroutine execute
+	time.Sleep(50 * time.Millisecond)
+	mockConnection.Close()
+	<-done
+
+	// Verify server received what we sent from stdin
+	if mockConnection.OutgoingBuffer.String() != "Hello World" {
+		t.Fatalf("server should receive %q from stdin, got %q",
+			"Hello World", mockConnection.OutgoingBuffer.String())
+	}
+
+	// Verify stdout received what server sent back
+	if serverOutput.String() != "Hello World" {
+		t.Fatalf("stdout should display %q from server, got %q",
+			"Hello World", serverOutput.String())
+	}
+}
+
+func TestTcpClientError(t *testing.T) {
+	// Create a mock connection that will generate errors
+	mockConnection := NewMockNetworkConnection()
+
+	// Immediately close the connection to simulate failure
+	mockConnection.Close()
+
+	// Setup input/output
+	userInput := bytes.NewBufferString("Hello World")
+	serverOutput := new(bytes.Buffer)
+
+	// Create client with the closed connection
+	tcpClient := NewTcpClient(mockConnection, userInput, serverOutput)
+
+	// The Start method should return an error
 	err := tcpClient.Start()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+
+	// Test should fail if no error is returned
+	if err == nil {
+		t.Fatal("expected an error when using a closed connection, got nil")
 	}
 
-	if mockWriter.String() != "Hello" {
-		t.Fatalf("expected to write %q, wrote %q", "Hello", mockWriter.String())
+	// Verify the error message contains information about the connection
+	if !strings.Contains(err.Error(), "connection") {
+		t.Fatalf("expected error message to mention connection issues, got: %v", err)
 	}
-
 }
