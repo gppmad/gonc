@@ -72,10 +72,10 @@ func (c *MockNetworkConnection) SetWriteDeadline(t time.Time) error {
 func TestTcpClient(t *testing.T) {
 	// Setup mock connection with simulated server response
 	mockConnection := NewMockNetworkConnection()
-	mockConnection.IncomingBuffer.WriteString("Hello World")
+	mockConnection.IncomingBuffer.WriteString("Receiving Hello World")
 
 	// Mock stdin (user input to be sent to server)
-	userInput := bytes.NewBufferString("Hello World")
+	userInput := bytes.NewBufferString("Promting Hello")
 
 	// Mock stdout (where server responses will be written)
 	serverOutput := new(bytes.Buffer)
@@ -83,28 +83,18 @@ func TestTcpClient(t *testing.T) {
 	// Create client with mocks
 	tcpClient := NewTcpClient(mockConnection, userInput, serverOutput)
 
-	// Start in goroutine since it blocks
-	done := make(chan struct{})
-	go func() {
-		tcpClient.Start()
-		close(done)
-	}()
-
-	// Let the goroutine execute
-	time.Sleep(50 * time.Millisecond)
-	mockConnection.Close()
-	<-done
+	tcpClient.Start()
 
 	// Verify server received what we sent from stdin
-	if mockConnection.OutgoingBuffer.String() != "Hello World" {
+	if mockConnection.OutgoingBuffer.String() != "Promting Hello" {
 		t.Fatalf("server should receive %q from stdin, got %q",
-			"Hello World", mockConnection.OutgoingBuffer.String())
+			"Promting Hello", mockConnection.OutgoingBuffer.String())
 	}
 
 	// Verify stdout received what server sent back
-	if serverOutput.String() != "Hello World" {
+	if serverOutput.String() != "Receiving Hello World" {
 		t.Fatalf("stdout should display %q from server, got %q",
-			"Hello World", serverOutput.String())
+			"Receiving Hello World", serverOutput.String())
 	}
 }
 
