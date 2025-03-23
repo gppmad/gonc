@@ -1,17 +1,11 @@
 # Go NetCat Implementation
 
-A Go implementation of the NetCat (`nc`) utility, focusing on networking functionality with a clean, idiomatic Go approach.
+A Go implementation of the NetCat (`nc`) utility, focusing on networking functionality with zero dependencies and an idiomatic Go approach.
 
-## Overview
-
-This project aims to recreate the core functionality of the popular NetCat utility in Go. The TCP client component is the first implementation, with more features planned.
 
 ## Current Features
 
-- TCP client implementation with:
-  - Customizable input/output streams
-  - Clean, minimalistic API
-  - Standard library only (no external dependencies)
+- TCP client
 
 ## Installation
 
@@ -28,7 +22,8 @@ go build -o nc
 
 ## Usage Examples
 
-# Connect to a remote server
+# Connect to a remote TCP server
+
 ```bash
 ./gonc example.com 80
 ```
