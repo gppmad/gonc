@@ -15,7 +15,9 @@ Since this project is not yet published as a Go package, you can install it dire
 # Clone the repository
 git clone git@github.com:gppmad/gonc.git
 cd gonc
+```
 
+```bash
 # Build the project
 go build -o nc
 ```
@@ -24,8 +26,12 @@ go build -o nc
 
 # Connect to a remote TCP server
 
+The actual implementation is using the https://tcpbin.com/ server.
+So if you just run it you will get as a response the thing that you've just submitted.
+
+
 ```bash
-./gonc example.com 80
+./gonc 
 ```
 
 
