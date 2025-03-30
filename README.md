@@ -26,12 +26,8 @@ go build -o nc
 
 # Connect to a remote TCP server
 
-The actual implementation is using the https://tcpbin.com/ server.
-So if you just run it you will get as a response the thing that you've just submitted.
-
-
 ```bash
-./gonc 
+./gonc host port
 ```
 
 
