@@ -11,6 +11,8 @@ import (
 
 func main() {
 
+	requireTLS := flag.Bool("tls", false, "Use TLS for the connection")
+
 	// Parse the flags
 	flag.Parse()
 
@@ -24,11 +26,13 @@ func main() {
 
 	host := args[0]
 	port := args[1]
+
 	address := fmt.Sprintf("%s:%s", host, port)
 
 	// Create configuration
 	config := network.Config{
 		RemoteAddr: address,
+		RequireTLS: *requireTLS,
 	}
 
 	// Create client based on configuration
@@ -37,7 +41,12 @@ func main() {
 		log.Fatal("Error creating client: ", err)
 	}
 
-	fmt.Println("Connected to a TCP Server")
+	// Update connection message based on protocol
+	if *requireTLS {
+		fmt.Println("Connected to a TLS Server")
+	} else {
+		fmt.Println("Connected to a TCP Server")
+	}
 
 	// Start the connection
 	err = client.Start()

@@ -30,4 +30,9 @@ go build -o nc
 ./gonc host port
 ```
 
+# Connect to a remote TCP server with TLS support
+```bash
+./gonc -tls host port
+```
+
 
