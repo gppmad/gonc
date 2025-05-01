@@ -9,57 +9,79 @@ import (
 	"github.com/gppmad/gonc/network"
 )
 
-func main() {
-
-	requireTLS := flag.Bool("tls", false, "Use TLS for the connection")
-
-	// Parse the flags
-	flag.Parse()
-
-	// Get host and port from arguments
-	args := flag.Args()
-	if len(args) < 2 {
-		fmt.Println("Usage: gonc [options] host port")
+// Check args and exit the program in case they don't satisfied the input structure.
+func checkArgs(listen *bool, args []string) {
+	if *listen && len(args) < 1 {
+		fmt.Println("Usage (server): gonc [options] -l port")
+		flag.PrintDefaults()
+		os.Exit(1)
+	} else if !*listen && len(args) < 2 {
+		fmt.Println("Usage (client): gonc [options] host port")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
+}
 
-	host := args[0]
-	port := args[1]
+// Run Client or Server mode
+func run(listen *bool, args []string, requireTLS *bool) {
+	var err error
+	if *listen {
+		err = runServer(args[0], *requireTLS)
+	} else {
+		err = runClient(args[0], args[1], *requireTLS)
+	}
 
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+func runClient(host, port string, requireTLS bool) error {
 	address := fmt.Sprintf("%s:%s", host, port)
 
-	// Create configuration
 	config := network.Config{
 		RemoteAddr: address,
-		RequireTLS: *requireTLS,
+		RequireTLS: requireTLS,
 	}
 
-	// Create client based on configuration
 	client, err := network.NewClient(config)
 	if err != nil {
-		log.Fatal("Error creating client: ", err)
+		return fmt.Errorf("error creating client: %w", err)
 	}
 
-	// Update connection message based on protocol
-	if *requireTLS {
+	if requireTLS {
 		fmt.Println("Connected to a TLS Server")
 	} else {
 		fmt.Println("Connected to a TCP Server")
 	}
 
-	// Start the connection
-	err = client.Start()
-	if err != nil {
-		// handle error
-		log.Fatal("Error during starting the proxy connection: ", err)
+	if err := client.Start(); err != nil {
+		return fmt.Errorf("error during starting the proxy connection: %w", err)
 	}
 
-	// Close the connection
-	err = client.Close()
-	if err != nil {
-		// handle error
-		log.Fatal("Error during closing the proxy connection: ", err)
+	if err := client.Close(); err != nil {
+		return fmt.Errorf("error during closing the proxy connection: %w", err)
 	}
 
+	return nil
+}
+
+func runServer(port string, requireTLS bool) error {
+	// TODO: Implement server logic
+	fmt.Printf("Starting server on port %s (TLS: %v)\n", port, requireTLS)
+	return fmt.Errorf("server mode not implemented yet")
+}
+
+func main() {
+
+	// Get the flags and parse them
+	requireTLS := flag.Bool("tls", false, "Use TLS for the connection")
+	listen := flag.Bool("l", false, "Listen mode - start server instead of client")
+
+	flag.Parse()
+
+	args := flag.Args()
+	checkArgs(listen, flag.Args())
+
+	run(listen, args, requireTLS)
 }
