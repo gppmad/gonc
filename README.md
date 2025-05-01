@@ -6,6 +6,7 @@ A Go implementation of the NetCat (`nc`) utility, focusing on networking functio
 ## Current Features
 
 - TCP client
+- TCP client with TLS support
 
 ## Installation
 
