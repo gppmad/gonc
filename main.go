@@ -83,5 +83,7 @@ func main() {
 	args := flag.Args()
 	checkArgs(listen, flag.Args())
 
+	// Run the client or server
 	run(listen, args, requireTLS)
+
 }

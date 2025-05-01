@@ -14,7 +14,16 @@ type TcpServer struct {
 	Output   io.Writer
 }
 
-// NewTcpServer creates a new TCP server instance
+// NewTcpServer creates a new TCP server instance with the specified network listener and I/O streams.
+//
+// Parameters:
+//   - listener: The TCP network listener that accepts incoming connections
+//   - input: Reader for server input (defaults to os.Stdin if nil)
+//   - output: Writer for server output (defaults to os.Stdout if nil)
+//
+// Returns:
+//
+//	A pointer to a fully initialized TcpServer instance ready to handle connections
 func NewTcpServer(listener net.Listener, input io.Reader, output io.Writer) *TcpServer {
 	if input == nil {
 		input = os.Stdin
