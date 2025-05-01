@@ -18,14 +18,14 @@ type Client interface {
 	Close() error
 }
 
-// Config contains connection parameters
-type Config struct {
+// ClientConfig contains connection parameters
+type ClientConfig struct {
 	RemoteAddr string
 	RequireTLS bool
 }
 
 // NewClient creates a new network client based on config
-func NewClient(config Config) (Client, error) {
+func NewClient(config ClientConfig) (Client, error) {
 
 	if config.RequireTLS {
 		// Connect to remote server with a TLS connection.

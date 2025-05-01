@@ -39,7 +39,7 @@ func run(listen *bool, args []string, requireTLS *bool) {
 func runClient(host, port string, requireTLS bool) error {
 	address := fmt.Sprintf("%s:%s", host, port)
 
-	config := network.Config{
+	config := network.ClientConfig{
 		RemoteAddr: address,
 		RequireTLS: requireTLS,
 	}
