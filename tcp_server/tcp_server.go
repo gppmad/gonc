@@ -40,6 +40,19 @@ func NewTcpServer(listener net.Listener, input io.Reader, output io.Writer) *Tcp
 	}
 }
 
+// NewDefaultTcpServer creates a new instance of TcpServer with default input and output streams.
+// It takes a net.Listener as a parameter to handle incoming network connections.
+// The returned TcpServer uses os.Stdin as the input stream and os.Stdout as the output stream.
+//
+// Parameters:
+//   - listener: A net.Listener to accept incoming connections.
+//
+// Returns:
+//   - A pointer to a TcpServer initialized with the provided listener and default input/output streams.
+func NewDefaultTcpServer(listener net.Listener) *TcpServer {
+	return &TcpServer{Listener: listener, Input: os.Stdin, Output: os.Stdout}
+}
+
 // Start begins accepting connections and handling them
 func (s *TcpServer) Start() error {
 	if s.Listener == nil {
