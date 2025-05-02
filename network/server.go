@@ -18,15 +18,18 @@ type Server interface {
 
 // ServerConfig contains server configuration parameters
 type ServerConfig struct {
-	RemoteAddr string
+	IP         string
+	Port       string
 	RequireTLS bool
 }
 
 // NewServer creates a new network server based on config
-func NewServer(config ClientConfig) (Server, error) {
+func NewServer(config ServerConfig) (Server, error) {
+	// Construct the full address with IP and port
+	address := net.JoinHostPort(config.IP, config.Port)
 
 	// Create a standard TCP listener
-	listener, err := net.Listen("tcp", config.RemoteAddr)
+	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return nil, err
 	}

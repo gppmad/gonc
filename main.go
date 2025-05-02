@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/gppmad/gonc/network"
 )
@@ -125,7 +127,34 @@ func runClient(host, port string, requireTLS bool) error {
 
 func runServer(port string, requireTLS bool) error {
 	fmt.Printf("Starting server on port %s (TLS: %v)\n", port, requireTLS)
-	return fmt.Errorf("not implemented yet")
+
+	config := network.ServerConfig{IP: "", Port: port, RequireTLS: requireTLS}
+	server, err := network.NewServer(config)
+	if err != nil {
+		return fmt.Errorf("error creating server: %w ", err)
+	}
+
+	// Handle OS signal to gracefully shut down the server
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-signalChan
+		fmt.Printf("Received signal: %v\n", sig)
+		if err := server.Close(); err != nil {
+			log.Printf("Error closing server: %v", err)
+		}
+		fmt.Println("Server shut down gracefully")
+		os.Exit(0)
+	}()
+
+	// Start the server
+	fmt.Printf("Server started on %s \n", port)
+	if err := server.Start(); err != nil {
+		log.Fatalf("Server error: %v", err)
+	}
+
+	return nil
 }
 
 func main() {
