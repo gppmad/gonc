@@ -9,119 +9,145 @@ import (
 	"time"
 )
 
-// MockNetworkConnection simulates a TCP connection with separate buffers
-// for incoming data (from server to client) and outgoing data (from client to server)
-type MockNetworkConnection struct {
-	IncomingBuffer bytes.Buffer // Data coming from server to client
-	OutgoingBuffer bytes.Buffer // Data going from client to server
-	Closed         bool
+type myConn struct {
+	OutgoingBuffer bytes.Buffer // from the client to server
+	IncomingBuffer bytes.Buffer // from the server to client
+	closeFlag      bool
+	readError      error // Error to return after first successful read
 }
 
-// NewMockNetworkConnection creates a new MockNetworkConnection.
-func NewMockNetworkConnection() *MockNetworkConnection {
-	return &MockNetworkConnection{}
-}
-
-// Read simulates reading data sent from the server
-func (c *MockNetworkConnection) Read(b []byte) (n int, err error) {
-	if c.Closed {
-		return 0, errors.New("connection is closed")
+func (c *myConn) Read(b []byte) (n int, err error) {
+	if c.closeFlag {
+		return 0, errors.New("connection is closed, cannot read")
 	}
-	return c.IncomingBuffer.Read(b)
+
+	// If no bytes are read and we have a readError, return it
+	n, err = c.IncomingBuffer.Read(b)
+	if n == 0 && c.readError != nil {
+		return 0, c.readError
+	}
+
+	return n, err
 }
 
-// Write simulates sending data to the server
-func (c *MockNetworkConnection) Write(b []byte) (n int, err error) {
-	if c.Closed {
-		return 0, errors.New("connection is closed")
+func (c *myConn) Write(b []byte) (n int, err error) {
+	if c.closeFlag {
+		return 0, errors.New("connection is closed, cannot write")
 	}
 	return c.OutgoingBuffer.Write(b)
 }
 
-// Close closes the connection.
-func (c *MockNetworkConnection) Close() error {
-	c.Closed = true
+func (c *myConn) Close() error {
+	c.closeFlag = true
 	return nil
 }
 
-// LocalAddr returns the local network address.
-func (c *MockNetworkConnection) LocalAddr() net.Addr {
+func (c *myConn) LocalAddr() net.Addr {
 	return &net.IPAddr{IP: net.IPv4(127, 0, 0, 1)}
 }
 
-// RemoteAddr returns the remote network address.
-func (c *MockNetworkConnection) RemoteAddr() net.Addr {
+func (c *myConn) RemoteAddr() net.Addr {
 	return &net.IPAddr{IP: net.IPv4(127, 0, 0, 1)}
 }
 
-// SetDeadline sets the read and write deadlines associated with the connection.
-func (c *MockNetworkConnection) SetDeadline(t time.Time) error {
+func (c *myConn) SetDeadline(t time.Time) error {
 	return nil
 }
 
-// SetReadDeadline sets the deadline for future Read calls.
-func (c *MockNetworkConnection) SetReadDeadline(t time.Time) error {
+func (c *myConn) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
-// SetWriteDeadline sets the deadline for future Write calls.
-func (c *MockNetworkConnection) SetWriteDeadline(t time.Time) error {
+func (c *myConn) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
-func TestTcpClient(t *testing.T) {
-	// Setup mock connection with simulated server response
-	mockConnection := NewMockNetworkConnection()
-	mockConnection.IncomingBuffer.WriteString("Receiving Hello World")
+func TestServerStart(t *testing.T) {
+	// I want to better describe this test, to make my understanding more solid.
+	// I assign an input value to the connection (using a buffer coming from a fixed string),
+	// L1: So my TCP Client will accept my mocked connection, this input and a pointer to an empty buffer which represent the output.
+	// L2: My mocked connection since at the end contains two buffers, will be instantiated with a message to
+	// the "incomingBuffer" and the an empty buffer as "outgoingBuffer"
+	// The value of the test is to test that :
+	// at level 1 (L1) the output is basically equal to the incomingBuffer
+	// at level 2 (L2) the input is basically equal to the outgoingBuffer
 
-	// Mock stdin (user input to be sent to server)
-	userInput := bytes.NewBufferString("Promting Hello")
+	// Define something that mock the standard input
+	inputStr := "my input"
+	input := bytes.NewBufferString(inputStr)
 
-	// Mock stdout (where server responses will be written)
-	serverOutput := new(bytes.Buffer)
+	// Define something that mock the incoming from the server
+	incomingMessage := bytes.NewBufferString("this is coming from the server")
 
-	// Create client with mocks
-	tcpClient := NewTcpClient(mockConnection, userInput, serverOutput)
+	// Populate the connection
+	myConn := &myConn{}
+	myConn.IncomingBuffer.WriteString(incomingMessage.String())
+	myConnOutput := new(bytes.Buffer)
 
-	tcpClient.Start()
+	// New TCP Server
+	client := NewTcpClient(myConn, input, myConnOutput)
+	client.Start()
 
-	// Verify server received what we sent from stdin
-	if mockConnection.OutgoingBuffer.String() != "Promting Hello" {
+	// Checks
+	if myConn.OutgoingBuffer.String() != inputStr {
 		t.Fatalf("server should receive %q from stdin, got %q",
-			"Promting Hello", mockConnection.OutgoingBuffer.String())
+			"my input", myConn.OutgoingBuffer.String())
 	}
 
-	// Verify stdout received what server sent back
-	if serverOutput.String() != "Receiving Hello World" {
+	if myConnOutput.String() != incomingMessage.String() {
 		t.Fatalf("stdout should display %q from server, got %q",
-			"Receiving Hello World", serverOutput.String())
+			"this is coming from the server", myConnOutput.String())
 	}
 }
 
-func TestTcpClientError(t *testing.T) {
-	// Create a mock connection that will generate errors
-	mockConnection := NewMockNetworkConnection()
+func TestServerErrorConnClosed(t *testing.T) {
+	// Define something that mock the standard input
+	inputStr := "my input"
+	input := bytes.NewBufferString(inputStr)
 
-	// Immediately close the connection to simulate failure
-	mockConnection.Close()
+	// Define something that mock the incoming from the server
+	incomingMessage := bytes.NewBufferString("this is coming from the server")
 
-	// Setup input/output
-	userInput := bytes.NewBufferString("Hello World")
-	serverOutput := new(bytes.Buffer)
+	// Populate the connection
+	myConn := &myConn{}
+	myConn.IncomingBuffer.WriteString(incomingMessage.String())
+	myConnOutput := new(bytes.Buffer)
 
-	// Create client with the closed connection
-	tcpClient := NewTcpClient(mockConnection, userInput, serverOutput)
+	// Close immediately the connection
+	myConn.Close()
+	client := NewTcpClient(myConn, input, myConnOutput)
+	err := client.Start()
 
-	// The Start method should return an error
-	err := tcpClient.Start()
-
-	// Test should fail if no error is returned
 	if err == nil {
-		t.Fatal("expected an error when using a closed connection, got nil")
+		t.Fatal("The connection should return an error")
 	}
 
 	// Verify the error message contains information about the connection
 	if !strings.Contains(err.Error(), "connection") {
 		t.Fatalf("expected error message to mention connection issues, got: %v", err)
+	}
+
+}
+
+func TestServerErrorReadingFromConnection(t *testing.T) {
+	inputStr := "my input"
+	input := bytes.NewBufferString(inputStr)
+
+	myConn := &myConn{
+		readError: errors.New("simulated read error"),
+	}
+	// Add just enough data for one read operation
+	myConn.IncomingBuffer.WriteString("initial data")
+	output := new(bytes.Buffer)
+
+	client := NewTcpClient(myConn, input, output)
+	err := client.Start()
+
+	if err == nil {
+		t.Fatal("Expected an error from reading the connection, but got nil")
+	}
+
+	if !strings.Contains(err.Error(), "error reading from the connection") {
+		t.Fatalf("Expected error message to mention reading from connection, got: %v", err)
 	}
 }
