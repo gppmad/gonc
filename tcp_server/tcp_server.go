@@ -12,18 +12,13 @@ type TcpServer struct {
 	Listener net.Listener
 	Input    io.Reader
 	Output   io.Writer
+
+	// Adding a new field to control server behavior.
+	// This is the function called everytime the the listener accepts a connection.
+	Handler func(conn net.Conn, input io.Reader, output io.Writer) error
 }
 
-// NewTcpServer creates a new TCP server instance with the specified network listener and I/O streams.
-//
-// Parameters:
-//   - listener: The TCP network listener that accepts incoming connections
-//   - input: Reader for server input (defaults to os.Stdin if nil)
-//   - output: Writer for server output (defaults to os.Stdout if nil)
-//
-// Returns:
-//
-//	A pointer to a fully initialized TcpServer instance ready to handle connections
+// NewTcpServer creates a new TCP server instance with the specified components
 func NewTcpServer(listener net.Listener, input io.Reader, output io.Writer) *TcpServer {
 	if input == nil {
 		input = os.Stdin
@@ -37,20 +32,36 @@ func NewTcpServer(listener net.Listener, input io.Reader, output io.Writer) *Tcp
 		Listener: listener,
 		Input:    input,
 		Output:   output,
+		Handler:  defaultHandler, // Set default handler
 	}
 }
 
-// NewDefaultTcpServer creates a new instance of TcpServer with default input and output streams.
-// It takes a net.Listener as a parameter to handle incoming network connections.
-// The returned TcpServer uses os.Stdin as the input stream and os.Stdout as the output stream.
-//
-// Parameters:
-//   - listener: A net.Listener to accept incoming connections.
-//
-// Returns:
-//   - A pointer to a TcpServer initialized with the provided listener and default input/output streams.
-func NewDefaultTcpServer(listener net.Listener) *TcpServer {
-	return &TcpServer{Listener: listener, Input: os.Stdin, Output: os.Stdout}
+// defaultHandler is the standard connection handling logic
+func defaultHandler(conn net.Conn, input io.Reader, output io.Writer) error {
+	defer conn.Close()
+
+	// Create channels for error handling
+	errChan := make(chan error, 1)
+
+	// Read from the connection and write to output
+	go func() {
+		_, err := io.Copy(output, conn)
+		errChan <- err
+	}()
+
+	// Read from input and write to connection
+	_, err := io.Copy(conn, input)
+	if err != nil {
+		<-errChan // Drain channel
+		return err
+	}
+
+	// Check for errors from the read goroutine
+	if err := <-errChan; err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Start begins accepting connections and handling them
@@ -65,36 +76,7 @@ func (s *TcpServer) Start() error {
 			return err
 		}
 
-		go s.handleConnection(conn)
-	}
-}
-
-// handleConnection manages a single client connection
-func (s *TcpServer) handleConnection(conn net.Conn) {
-	defer conn.Close()
-
-	// Create channels for error handling
-	errChan := make(chan error, 1)
-
-	// Read from the connection and write to output
-	go func() {
-		_, err := io.Copy(s.Output, conn)
-		if err != nil {
-			errChan <- err
-			return
-		}
-		errChan <- nil
-	}()
-
-	// Read from input and write to connection
-	_, err := io.Copy(conn, s.Input)
-	if err != nil {
-		return
-	}
-
-	// Check for errors from the read goroutine
-	if err := <-errChan; err != nil {
-		return
+		go s.Handler(conn, s.Input, s.Output)
 	}
 }
 

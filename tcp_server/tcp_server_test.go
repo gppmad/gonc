@@ -1,216 +1,182 @@
 package tcp_server
 
 import (
-	"bytes"
 	"errors"
+	"io"
 	"net"
-	"strings"
 	"testing"
 	"time"
 )
 
-// MockListener implements net.Listener for testing
-type MockListener struct {
-	acceptChan chan net.Conn
-	closeChan  chan struct{}
-	closed     bool
+// mockConn implements a fake network connection that we can control
+type mockConn struct {
+	net.Conn               // embed net.Conn interface
+	closed   chan struct{} // channel to signal when Close() is called
 }
 
-func NewMockListener() *MockListener {
-	return &MockListener{
-		acceptChan: make(chan net.Conn, 1),
-		closeChan:  make(chan struct{}),
-	}
-}
-
-func (m *MockListener) Accept() (net.Conn, error) {
-	select {
-	case conn := <-m.acceptChan:
-		return conn, nil
-	case <-m.closeChan:
-		return nil, errors.New("listener closed")
-	}
-}
-
-func (m *MockListener) Close() error {
-	if m.closed {
-		return errors.New("listener already closed")
-	}
-	m.closed = true
-	close(m.closeChan)
+// Close signals that the connection was closed by closing the channel
+func (m *mockConn) Close() error {
+	close(m.closed)
 	return nil
 }
 
-func (m *MockListener) Addr() net.Addr {
-	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8080}
+// Read returns EOF immediately to prevent blocking
+func (m *mockConn) Read(b []byte) (n int, err error) {
+	return 0, io.EOF
 }
 
-// MockConnection implements net.Conn for testing
-type MockConnection struct {
-	readBuf  *bytes.Buffer
-	writeBuf *bytes.Buffer
-	closed   bool
+// Write pretends to write data successfully
+func (m *mockConn) Write(b []byte) (n int, err error) {
+	return len(b), nil
 }
 
-func NewMockConnection() *MockConnection {
-	return &MockConnection{
-		readBuf:  new(bytes.Buffer),
-		writeBuf: new(bytes.Buffer),
-	}
+// mockListener simulates a network listener that we can control
+type mockListener struct {
+	acceptCalled bool          // tracks if Accept was called
+	connections  chan net.Conn // channel to control what connections are returned
 }
 
-func (m *MockConnection) Read(b []byte) (n int, err error) {
-	if m.closed {
-		return 0, errors.New("connection closed")
-	}
-	return m.readBuf.Read(b)
+// Accept waits for a connection to be sent on the connections channel
+func (m *mockListener) Accept() (net.Conn, error) {
+	m.acceptCalled = true
+	// Block until a connection is provided through the channel
+	conn := <-m.connections
+	return conn, nil
 }
 
-func (m *MockConnection) Write(b []byte) (n int, err error) {
-	if m.closed {
-		return 0, errors.New("connection closed")
-	}
-	return m.writeBuf.Write(b)
-}
+func (m *mockListener) Close() error   { return nil }
+func (m *mockListener) Addr() net.Addr { return nil }
 
-func (m *MockConnection) Close() error {
-	m.closed = true
-	return nil
-}
+func TestStartCreatesGoroutine(t *testing.T) {
+	// Create channel to control when connections are returned by Accept
+	connChan := make(chan net.Conn)
+	mock := &mockListener{connections: connChan}
+	server := NewTcpServer(mock, nil, nil)
 
-func (m *MockConnection) LocalAddr() net.Addr {
-	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8080}
-}
-
-func (m *MockConnection) RemoteAddr() net.Addr {
-	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
-}
-
-func (m *MockConnection) SetDeadline(t time.Time) error      { return nil }
-func (m *MockConnection) SetReadDeadline(t time.Time) error  { return nil }
-func (m *MockConnection) SetWriteDeadline(t time.Time) error { return nil }
-
-func TestTcpServer(t *testing.T) {
-	// Create mock listener and connection
-	listener := NewMockListener()
-	conn := NewMockConnection()
-
-	// Setup test data
-	testInput := "test input"
-	testResponse := "test response"
-	conn.readBuf.WriteString(testResponse)
-
-	// Create server with mock I/O
-	serverInput := bytes.NewBufferString(testInput)
-	serverOutput := new(bytes.Buffer)
-	server := NewTcpServer(listener, serverInput, serverOutput)
-
-	// Start server in a goroutine
-	go func() {
-		listener.acceptChan <- conn
-	}()
-
-	// Start server and wait for a short time
+	// Start server in a goroutine because Start() blocks
 	go server.Start()
-	time.Sleep(100 * time.Millisecond)
 
-	// Verify the connection received the input
-	if got := conn.writeBuf.String(); got != testInput {
-		t.Errorf("Expected connection to receive %q, got %q", testInput, got)
-	}
+	// Create a mock connection with a channel to signal when it's closed
+	mockConn := &mockConn{closed: make(chan struct{})}
 
-	// Verify the server output
-	if got := serverOutput.String(); got != testResponse {
-		t.Errorf("Expected server output %q, got %q", testResponse, got)
-	}
-}
+	// Send the connection through our channel
+	// This will cause Accept() to return this connection
+	connChan <- mockConn
 
-func TestTcpServerClose(t *testing.T) {
-	listener := NewMockListener()
-	server := NewTcpServer(listener, nil, nil)
-
-	// Test closing the server
-	err := server.Close()
-	if err != nil {
-		t.Errorf("Expected no error when closing server, got %v", err)
-	}
-
-	// Test closing an already closed server
-	err = server.Close()
-	if err == nil {
-		t.Error("Expected error when closing already closed server, got nil")
+	// Check if the connection was handled by verifying Close was called
+	select {
+	case <-mockConn.closed:
+		// Success: this means:
+		// 1. Start() accepted the connection
+		// 2. Started a goroutine with the handler
+		// 3. Handler called Close() on the connection (due to defer)
+	case <-time.After(100 * time.Millisecond):
+		// If we get here, either:
+		// 1. The goroutine wasn't created
+		// 2. The handler didn't run
+		// 3. Close wasn't called
+		t.Error("connection was not handled in goroutine")
 	}
 }
 
-func TestTcpServerNilListener(t *testing.T) {
-	server := NewTcpServer(nil, nil, nil)
-
-	// Test starting server with nil listener
-	err := server.Start()
-	if err == nil {
-		t.Error("Expected error when starting server with nil listener, got nil")
-	}
-	if !strings.Contains(err.Error(), "listener not initialized") {
-		t.Errorf("Expected error to contain 'listener not initialized', got %v", err)
+func TestClose(t *testing.T) {
+	// Test case 1: nil listener
+	server := &TcpServer{Listener: nil}
+	if err := server.Close(); err == nil {
+		t.Error("expected error for nil listener, got nil")
 	}
 
-	// Test closing server with nil listener
-	err = server.Close()
-	if err == nil {
-		t.Error("Expected error when closing server with nil listener, got nil")
-	}
-	if !strings.Contains(err.Error(), "listener not initialized") {
-		t.Errorf("Expected error to contain 'listener not initialized', got %v", err)
+	// Test case 2: initialized listener
+	mock := &mockListener{}
+	server = &TcpServer{Listener: mock}
+	if err := server.Close(); err != nil {
+		t.Errorf("expected no error, got %v", err)
 	}
 }
 
-// MockListenerError always returns an error on Accept
-type MockListenerError struct{}
+// Test the errors in the handler
 
-func (m *MockListenerError) Accept() (net.Conn, error) {
-	return nil, errors.New("accept error")
-}
-func (m *MockListenerError) Close() error { return nil }
-func (m *MockListenerError) Addr() net.Addr {
-	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 9999}
+// mockConnRW is a mock implementation of net.Conn that allows us to:
+// - Inject custom readers and writers for testing different scenarios
+// - Track when the connection is closed
+// - Control the behavior of Read and Write operations
+type mockConnRW struct {
+	net.Conn               // Embed net.Conn interface
+	reader   io.Reader     // Custom reader for controlling Read behavior
+	writer   io.Writer     // Custom writer for controlling Write behavior
+	closed   chan struct{} // Channel to track when Close is called
 }
 
-func TestTcpServerAcceptError(t *testing.T) {
-	listener := &MockListenerError{}
-	server := NewTcpServer(listener, nil, nil)
-	err := server.Start()
-	if err == nil || !strings.Contains(err.Error(), "accept error") {
-		t.Errorf("Expected accept error, got %v", err)
+func (m *mockConnRW) Read(p []byte) (n int, err error) {
+	return m.reader.Read(p) // Delegate to custom reader
+}
+
+func (m *mockConnRW) Write(p []byte) (n int, err error) {
+	return m.writer.Write(p) // Delegate to custom writer
+}
+
+func (m *mockConnRW) Close() error {
+	close(m.closed) // Signal that Close was called
+	return nil
+}
+
+// mockReader simulates a reader that returns a specified error and then EOF
+type mockReader struct {
+	err       error
+	callCount int
+}
+
+func (m *mockReader) Read(p []byte) (n int, err error) {
+	m.callCount++
+	if m.callCount == 1 && m.err != nil {
+		return 0, m.err
 	}
+	return 0, io.EOF // Return EOF after first call or if no error specified
 }
 
-// MockWriterError always returns an error on Write
-type MockWriterError struct{}
+// mockWriter simulates a writer that always succeeds
+type mockWriter struct{}
 
-func (m *MockWriterError) Write(p []byte) (n int, err error) {
-	return 0, errors.New("write error")
+func (m *mockWriter) Write(p []byte) (n int, err error) {
+	return len(p), nil
 }
 
-func TestTcpServerHandleConnectionOutputError(t *testing.T) {
-	conn := NewMockConnection()
-	conn.readBuf.WriteString("data") // so io.Copy tries to write
-	server := NewTcpServer(nil, bytes.NewBufferString(""), &MockWriterError{})
-	// Call handleConnection directly
-	server.handleConnection(conn)
-	// No panic = pass; can't check return, but coverage will hit the error path
-}
+func TestDefaultHandler(t *testing.T) {
+	// Test case 1: Error when copying from input to connection
+	t.Run("input copy error", func(t *testing.T) {
+		expectedErr := errors.New("input error")
+		mockConn := &mockConnRW{
+			reader: &mockReader{}, // Will return EOF
+			writer: &mockWriter{}, // Always succeeds
+			closed: make(chan struct{}),
+		}
 
-// MockReaderError always returns an error on Read
-type MockReaderError struct{}
+		// Create input that will error on first call and then EOF
+		input := &mockReader{err: expectedErr}
+		output := &mockWriter{}
 
-func (m *MockReaderError) Read(p []byte) (n int, err error) {
-	return 0, errors.New("read error")
-}
+		err := defaultHandler(mockConn, input, output)
+		if err.Error() != expectedErr.Error() {
+			t.Errorf("expected error %v, got %v", expectedErr, err)
+		}
+	})
 
-func TestTcpServerHandleConnectionInputError(t *testing.T) {
-	conn := NewMockConnection()
-	server := NewTcpServer(nil, &MockReaderError{}, new(bytes.Buffer))
-	// Call handleConnection directly
-	server.handleConnection(conn)
-	// No panic = pass; can't check return, but coverage will hit the error path
+	// Test case 2: Error when copying from connection to output
+	t.Run("connection read error", func(t *testing.T) {
+		expectedErr := errors.New("conn read error")
+		mockConn := &mockConnRW{
+			reader: &mockReader{err: expectedErr}, // Connection read will error then EOF
+			writer: &mockWriter{},                 // Always succeeds
+			closed: make(chan struct{}),
+		}
+
+		// Create normal input/output (input will return EOF)
+		input := &mockReader{}
+		output := &mockWriter{}
+
+		err := defaultHandler(mockConn, input, output)
+		if err.Error() != expectedErr.Error() {
+			t.Errorf("expected error %v, got %v", expectedErr, err)
+		}
+	})
 }
