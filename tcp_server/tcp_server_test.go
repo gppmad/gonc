@@ -1,4 +1,4 @@
-package tcp_server
+package tcp_server_test
 
 import (
 	"errors"
@@ -6,64 +6,57 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	tcp_server "github.com/gppmad/gonc/tcp_server"
 )
 
-// mockConn implements a fake network connection that we can control
-type mockConn struct {
-	net.Conn               // embed net.Conn interface
-	closed   chan struct{} // channel to signal when Close() is called
+// Create a mock listener
+type MockListener struct {
+	// Derive from the listener interfaces the other methods that I don't need to use.
+	net.Listener
+	connections chan net.Conn
 }
 
-// Close signals that the connection was closed by closing the channel
-func (m *mockConn) Close() error {
-	close(m.closed)
-	return nil
-}
-
-// Read returns EOF immediately to prevent blocking
-func (m *mockConn) Read(b []byte) (n int, err error) {
-	return 0, io.EOF
-}
-
-// Write pretends to write data successfully
-func (m *mockConn) Write(b []byte) (n int, err error) {
-	return len(b), nil
-}
-
-// mockListener simulates a network listener that we can control
-type mockListener struct {
-	acceptCalled bool          // tracks if Accept was called
-	connections  chan net.Conn // channel to control what connections are returned
-}
-
-// Accept waits for a connection to be sent on the connections channel
-func (m *mockListener) Accept() (net.Conn, error) {
-	m.acceptCalled = true
-	// Block until a connection is provided through the channel
-	conn := <-m.connections
+func (l *MockListener) Accept() (net.Conn, error) {
+	conn := <-l.connections
 	return conn, nil
 }
 
-func (m *mockListener) Close() error   { return nil }
-func (m *mockListener) Addr() net.Addr { return nil }
+// Create a conn listener
+type MockConn struct {
+	net.Conn
+	closed chan struct{} // channel to signal when Close() is called
 
-func TestStartCreatesGoroutine(t *testing.T) {
-	// Create channel to control when connections are returned by Accept
+}
+
+func (c *MockConn) Read(b []byte) (n int, err error) {
+	return n, io.EOF
+}
+
+func (c *MockConn) Write(b []byte) (n int, err error) {
+	return len(b), nil
+}
+
+func (c *MockConn) Close() error {
+	close(c.closed)
+	return nil
+}
+
+func TestHappyPath(t *testing.T) {
 	connChan := make(chan net.Conn)
-	mock := &mockListener{connections: connChan}
-	server := NewTcpServer(mock, nil, nil)
+	mockListener := &MockListener{connections: connChan}
+	server := tcp_server.NewTcpServer(mockListener, nil, nil)
 
-	// Start server in a goroutine because Start() blocks
+	// Start the server
 	go server.Start()
 
 	// Create a mock connection with a channel to signal when it's closed
-	mockConn := &mockConn{closed: make(chan struct{})}
+	mockConn := &MockConn{closed: make(chan struct{})}
 
 	// Send the connection through our channel
 	// This will cause Accept() to return this connection
 	connChan <- mockConn
 
-	// Check if the connection was handled by verifying Close was called
 	select {
 	case <-mockConn.closed:
 		// Success: this means:
@@ -77,20 +70,46 @@ func TestStartCreatesGoroutine(t *testing.T) {
 		// 3. Close wasn't called
 		t.Error("connection was not handled in goroutine")
 	}
+
+}
+
+// SimpleListener only implements Close for testing Close() functionality
+type SimpleListener struct {
+	net.Listener
+	closeCalled bool
+}
+
+func (l *SimpleListener) Close() error {
+	l.closeCalled = true
+	return nil
+}
+
+func (l *SimpleListener) Accept() (net.Conn, error) {
+	// This shouldn't be called during Close() testing
+	return nil, errors.New("Accept not implemented")
+}
+
+func (l *SimpleListener) Addr() net.Addr {
+	return nil
 }
 
 func TestClose(t *testing.T) {
 	// Test case 1: nil listener
-	server := &TcpServer{Listener: nil}
+	server := &tcp_server.TcpServer{Listener: nil}
 	if err := server.Close(); err == nil {
 		t.Error("expected error for nil listener, got nil")
 	}
 
 	// Test case 2: initialized listener
-	mock := &mockListener{}
-	server = &TcpServer{Listener: mock}
+	mock := &SimpleListener{}
+	server = &tcp_server.TcpServer{Listener: mock}
 	if err := server.Close(); err != nil {
 		t.Errorf("expected no error, got %v", err)
+	}
+
+	// Optional: verify Close was called
+	if !mock.closeCalled {
+		t.Error("listener.Close() was not called")
 	}
 }
 
@@ -155,7 +174,7 @@ func TestDefaultHandler(t *testing.T) {
 		input := &mockReader{err: expectedErr}
 		output := &mockWriter{}
 
-		err := defaultHandler(mockConn, input, output)
+		err := tcp_server.DefaultHandler(mockConn, input, output)
 		if err.Error() != expectedErr.Error() {
 			t.Errorf("expected error %v, got %v", expectedErr, err)
 		}
@@ -174,7 +193,7 @@ func TestDefaultHandler(t *testing.T) {
 		input := &mockReader{}
 		output := &mockWriter{}
 
-		err := defaultHandler(mockConn, input, output)
+		err := tcp_server.DefaultHandler(mockConn, input, output)
 		if err.Error() != expectedErr.Error() {
 			t.Errorf("expected error %v, got %v", expectedErr, err)
 		}

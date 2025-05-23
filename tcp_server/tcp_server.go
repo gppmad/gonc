@@ -32,12 +32,12 @@ func NewTcpServer(listener net.Listener, input io.Reader, output io.Writer) *Tcp
 		Listener: listener,
 		Input:    input,
 		Output:   output,
-		Handler:  defaultHandler, // Set default handler
+		Handler:  DefaultHandler, // Set default handler
 	}
 }
 
-// defaultHandler is the standard connection handling logic
-func defaultHandler(conn net.Conn, input io.Reader, output io.Writer) error {
+// DefaultHandler is the standard connection handling logic
+func DefaultHandler(conn net.Conn, input io.Reader, output io.Writer) error {
 	defer conn.Close()
 
 	// Create channels for error handling
